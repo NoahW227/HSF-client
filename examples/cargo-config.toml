@@ -1,0 +1,7 @@
+# Merge into your firmware project's .cargo/config.toml.
+# Keep the project's own rustflags (e.g. -Tlink.x) and [env].
+[target.'cfg(all(target_arch = "arm", target_os = "none"))']
+runner = ["ectf", "flash"]
+
+[build]
+target = "thumbv6m-none-eabi"   # MSPM0L2228 = Cortex-M0+
