@@ -13,7 +13,7 @@ You need:
 
 ```sh
 cd ~          # NOT inside a firmware project (its .cargo/config.toml would break the install)
-cargo install --locked --git https://github.com/NoahW227/HSF-client.git ectf-remote
+cargo install --locked --git https://github.com/NoahW227/HSF-client.git HSF-client
 ectf setup    # name, network, default board, SSH key
 ectf doctor   # check everything works
 ```
