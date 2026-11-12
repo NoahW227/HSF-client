@@ -115,13 +115,10 @@ Changing any of these on the Pi needs a matching client change.
 
 ## ELF → .bin
 
-The `.bin` has the same layout `rust-objcopy -O binary` produces for normal
-cortex-m-rt builds. It takes every `PT_LOAD` segment with file data, places
-it at its **physical** address (so `.data` lands at its flash load address,
-not its RAM address), and fills gaps with zeros. The tool rejects non-ARM ELFs
-and images over 1 MiB, which usually means a segment has a RAM load address.
-To check against objcopy:
-`rust-objcopy -O binary fw ref.bin && cmp ref.bin fw.bin`.
+The utility searches for objcopy by checking ECTF_OBJCOPY env var, then
+rustup llvm-tools, then rust-objcopy or arm-none-eabi-objcopy on PATH.
+You can check this by running `ectf doctor` within a project's firmware 
+directory.
 
 ## Signals and process groups
 

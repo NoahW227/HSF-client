@@ -2,9 +2,9 @@
 
 use crate::config::{self, Config};
 use crate::ssh::{spawn_error, Ssh};
-use crate::{boards, debug};
+use crate::{boards, debug, flash};
 use anyhow::{bail, Context, Result};
-use std::fs;
+use std::{error, fs};
 use std::io::{self, Write};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
@@ -173,6 +173,10 @@ pub fn doctor(cfg: &Config) -> Result<i32> {
     }
     let dash = boards::api(cfg, "/api/status", None);
     report("dashboard", dash.is_ok(), "check Tailscale/LAN and ECTF_DASHBOARD");
+    match flash::find_objcopy() {
+        Some(p) => report(&format!("objcopy: {}", p.display()), true, ""),
+        None => report("objcopy", false, "run `rustup component add llvm-tools` (or set ECTF_OBJCOPY)"),
+    }
     match debug::find_gdb(cfg) {
         Ok(p) => println!("ok    gdb: {}", p.display()),
         Err(e) => println!("warn  gdb (only needed for `ectf debug`): {e:#}"),

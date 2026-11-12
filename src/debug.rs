@@ -97,8 +97,8 @@ fn warn_if_not_flashed(cfg: &Config, elf: &Path) {
         );
         return;
     };
-    let sha = fs::read(elf).ok().and_then(|d| flash::elf_to_bin(&d).ok()).map(|b| flash::sha256_hex(&b));
-    if sha.as_deref() != Some(rec.sha256.as_str()) {
+    let sha = fs::read(elf).ok().map(|d| flash::sha256_hex(&d));
+    if sha.as_deref() != Some(rec.elf_sha256.as_str()) {
         eprintln!(
             "warning: {} is not the image you last flashed to {} (rebuilt without flashing?). \
              Symbols may not match; run `cargo run --release` first.",

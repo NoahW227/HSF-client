@@ -140,6 +140,8 @@ pub struct State {
 pub struct FlashRecord {
     pub elf: PathBuf,
     pub sha256: String,
+    #[serde(default)]
+    pub elf_sha256: String,
     pub unix_time: u64,
 }
 

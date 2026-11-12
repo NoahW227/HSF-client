@@ -2,7 +2,7 @@
 
 use crate::config::{Config, FlashRecord, State};
 use crate::ssh::{self, quote, Ssh};
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{bail, Context, Result};
 use sha2::{Digest, Sha256};
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
@@ -21,10 +21,14 @@ pub fn run(cfg: &Config, elf_path: &Path, extra: &[String]) -> Result<i32> {
     let user = cfg.user()?;
     let elf_path = absolute(elf_path)?;
     let elf = fs::read(&elf_path).with_context(|| format!("reading {}", elf_path.display()))?;
-    let bin = elf_to_bin(&elf).with_context(|| format!("converting {}", elf_path.display()))?;
-
+    let elf_sha = sha256_hex(&elf);
+    
     let bin_path = with_suffix(&elf_path, ".bin");
-    fs::write(&bin_path, &bin).with_context(|| format!("writing {}", bin_path.display()))?;
+    objcopy(&elf_path, &bin_path)?;
+    let bin = fs::read(&bin_path).with_context(|| format!("reading {}", bin_path.display()))?;
+    if bin.is_empty() || bin.starts_with(b"\x7fELF") {
+        bail!("{} doesn't look like a raw image", bin_path.display());
+    }
     let sha = sha256_hex(&bin);
     println!("built {} ({} bytes) -> {} {}", bin_path.display(), bin.len(), cfg.pi, cfg.board);
 
@@ -76,7 +80,7 @@ pub fn run(cfg: &Config, elf_path: &Path, extra: &[String]) -> Result<i32> {
         let mut state = State::load();
         state.last_flash.insert(
             cfg.board.clone(),
-            FlashRecord { elf: elf_path.clone(), sha256: sha, unix_time: unix_now().0 },
+            FlashRecord { elf: elf_path.clone(), sha256: sha, elf_sha256: elf_sha, unix_time: unix_now().0 },
         );
         if let Err(e) = state.save() {
             eprintln!("warning: couldn't record flash for `ectf debug`: {e:#}");
@@ -85,40 +89,47 @@ pub fn run(cfg: &Config, elf_path: &Path, extra: &[String]) -> Result<i32> {
     Ok(status.code().unwrap_or(1))
 }
 
-/// Same output as `objcopy -O binary`: the file contents of every PT_LOAD
-/// segment, placed at its physical (load) address, with gaps zero-filled.
-pub fn elf_to_bin(elf: &[u8]) -> Result<Vec<u8>> {
-    use object::elf::{FileHeader32, EM_ARM, PT_LOAD};
-    use object::read::elf::{FileHeader, ProgramHeader};
-    use object::Endianness;
+/// Convert with objcopy.
+fn objcopy(elf: &Path, bin: &Path) -> Result<()> {
+    let tool = find_objcopy().context(
+        "no objcopy found: run `rustup component add llvm-tools` (or set ECTF_OBJCOPY)",
+    )?;
+    let out = Command::new(&tool)
+        .args(["-O", "binary"])
+        .arg(elf)
+        .arg(bin)
+        .stdin(Stdio::null())
+        .output()
+        .with_context(|| format!("running {}", tool.display()))?;
+    if !out.status.success() {
+        bail!("{} failed:\n{}", tool.display(), String::from_utf8_lossy(&out.stderr).trim());
+    }
+    Ok(())
+}
 
-    let hdr = FileHeader32::<Endianness>::parse(elf).context("not a 32-bit ELF file")?;
-    let endian = hdr.endian().context("bad ELF endianness")?;
-    if hdr.e_machine(endian) != EM_ARM {
-        bail!("not an ARM ELF (is the build target thumbv6m-none-eabi?)");
+/// Search order: ECTF_OBJCOPY, the rustup llvm-tools component, then rust-objcopy / arm-none-eabi-objcopy on PATH.
+pub fn find_objcopy() -> Option<PathBuf> {
+    if let Some(p) = env::var_os("ECTF_OBJCOPY").filter(|p| !p.is_empty()) {
+        return Some(PathBuf::from(p));
     }
-    let mut segs: Vec<(u64, &[u8])> = Vec::new();
-    for ph in hdr.program_headers(endian, elf).context("bad ELF program headers")? {
-        if ph.p_type(endian) != PT_LOAD || ph.p_filesz(endian) == 0 {
-            continue;
+    let rustc = |arg: &[&str]| -> Option<String> {
+        let o = Command::new("rustc").args(arg).stderr(Stdio::null()).output().ok()?;
+        o.status.success().then(|| String::from_utf8_lossy(&o.stdout).into_owned())
+    };
+    if let (Some(sysroot), Some(vv)) = (rustc(&["--print", "sysroot"]), rustc(&["-vV"])) {
+        if let Some(host) = vv.lines().find_map(|l| l.strip_prefix("host: ")) {
+            let p = PathBuf::from(sysroot.trim())
+                .join("lib/rustlib")
+                .join(host.trim())
+                .join("bin")
+                .join(format!("llvm-objcopy{}", env::consts::EXE_SUFFIX));
+            if p.is_file() {
+                return Some(p);
+            }
         }
-        let data = ph.data(endian, elf).map_err(|_| anyhow!("ELF segment out of bounds"))?;
-        segs.push((u64::from(ph.p_paddr(endian)), data));
     }
-    let start = segs.iter().map(|s| s.0).min().context("ELF has no loadable data")?;
-    let end = segs.iter().map(|s| s.0 + s.1.len() as u64).max().unwrap();
-    if end - start > MAX_IMAGE {
-        bail!(
-            "image would span {:#x}..{:#x} ({} bytes); check the linker script's load addresses",
-            start, end, end - start
-        );
-    }
-    let mut out = vec![0u8; (end - start) as usize];
-    for (addr, data) in segs {
-        let off = (addr - start) as usize;
-        out[off..off + data.len()].copy_from_slice(data);
-    }
-    Ok(out)
+    ["rust-objcopy", "arm-none-eabi-objcopy"].into_iter().find_map(crate::debug::which)
+
 }
 
 pub fn sha256_hex(data: &[u8]) -> String {

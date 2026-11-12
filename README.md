@@ -62,7 +62,7 @@ There are only 4 hardware breakpoints. `load` is disabled, so flash with `cargo 
 
 ## Troubleshooting
 
-- **Anything failing**: run `ectf doctor`.
+- **Anything failing**: run `ectf doctor`. (if objcopy related, run inside project's firmware dir)
 - **SSH fails but the password works**: if your key has a passphrase, run `ssh-add` (Windows: start the "OpenSSH Authentication Agent" service first).
 - **"local port N is busy"**: `ectf debug --local-port 3334`.
 - **Symbols don't match the board**: someone else flashed it, or you rebuilt without flashing. Run `cargo run --release` again.
